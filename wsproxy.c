@@ -107,17 +107,12 @@ static void
 hyxie76_calcresponse(uint32_t key1, uint32_t key2, const char *key3, char *out)
 {
 	MD5_CTX c;
-	char in[16];
-
-	in[0] = key1 >> 24;
-	in[1] = key1 >> 16;
-	in[2] = key1 >> 8;
-	in[3] = key1;
-	in[4] = key2 >> 24;
-	in[5] = key2 >> 16;
-	in[6] = key2 >> 8;
-	in[7] = key2;
-	memcpy(in + 8, key3, 8);
+	char in[16] = {
+	    key1 >> 24, key1 >> 16, key1 >> 8, key1,
+	    key2 >> 24, key2 >> 16, key2 >> 8, key2,
+	    key3[0], key3[1], key3[2], key3[3],
+	    key3[4], key3[5], key3[6], key3[7]
+	};
 
 	MD5_Init(&c);
 	MD5_Update(&c, (void *)in, sizeof in);
