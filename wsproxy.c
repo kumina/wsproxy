@@ -41,6 +41,7 @@
 #include <openssl/sha.h>
 
 #define	HYBI10_ACCEPTLEN	28
+#define	HYBI10_MAXOFRAME	125
 
 static pid_t other;
 static int hybi10 = 0;
@@ -334,8 +335,8 @@ hybi10_decode(FILE *in, int outfd)
 static void
 hybi10_encode(int in, int out)
 {
-	unsigned char inbuf[125];
-	char outbuf[sizeof inbuf * 2 + 2];
+	unsigned char inbuf[HYBI10_MAXOFRAME / 4 * 3];
+	char outbuf[HYBI10_MAXOFRAME + 3]; /* Two-byte header + nul. */
 	ssize_t len, wlen;
 
 	/* Restrict size to 125 bytes, to prevent extended headers. */
