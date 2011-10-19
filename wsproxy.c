@@ -38,8 +38,12 @@
 #include <unistd.h>
 
 #include <openssl/md5.h>
+#include <openssl/sha.h>
+
+#define	HYBI10_ACCEPTLEN	28
 
 static pid_t other;
+static int hybi10 = 0;
 
 static void
 die(int exitcode)
@@ -57,7 +61,7 @@ usage(void)
 	exit(1);
 }
 
-static int
+static unsigned char
 pgetc(FILE *fp)
 {
 	int ret;
@@ -67,111 +71,6 @@ pgetc(FILE *fp)
 		die(0);
 	return (ret);
 }
-
-#if 0 /* UTF-8 */
-
-static void
-pputc(FILE *fp, unsigned char ch)
-{
-	int ret;
-
-	ret = fputc(ch, fp);
-	if (ret == EOF)
-		die(0);
-}
-
-static void
-decode(FILE *in, int outfd)
-{
-	FILE *out;
-	int ch;
-	unsigned char och;
-
-	out = fdopen(outfd, "w");
-	if (out == NULL) {
-		perror("fdopen");
-		die(1);
-	}
-
-	for (;;) {
-		/* Frame header. */
-		ch = pgetc(in);
-		if (ch != 0x00) {
-			fprintf(stderr, "malformed frame header received\n");
-			die(1);
-		}
-
-		for (;;) {
-			/* Frame trailer. */
-			ch = pgetc(in);
-			if (ch == EOF)
-				die(0);
-			if (ch == 0xff) {
-				fflush(out);
-				break;
-			}
-
-			/* UTF-8 character, only allowing points 0 to 255. */
-			if (ch < 0x80)
-				och = ch;
-			else if ((ch & 0xf3) == 0xc0) {
-				och = ch << 6;
-				ch = pgetc(in);
-				if ((ch & 0xc0) != 0x80)
-					goto malformed;
-				och |= ch & 0x3f;
-			} else
-				goto malformed;
-			pputc(out, och);
-		}
-	}
-
-malformed:
-	fprintf(stderr, "malformed UTF-8 sequence received\n");
-	die(1);
-}
-
-static int
-encode(int in, int out)
-{
-	unsigned char inbuf[512];
-	unsigned char outbuf[sizeof inbuf * 2 + 2];
-	unsigned char *op;
-	ssize_t len, i;
-
-	for (;;) {
-		len = read(in, inbuf, sizeof inbuf);
-		if (len == -1) {
-			perror("read");
-			die(1);
-		} else if (len == 0)
-			die(0);
-
-		op = outbuf;
-		/* Frame header. */
-		*op++ = 0x00;
-		for (i = 0; i < len; i++) {
-			/* Encode data as UTF-8. */
-			if (inbuf[i] < 0x80)
-				*op++ = inbuf[i];
-			else {
-				*op++ = 0xc0 | (inbuf[i] >> 6);
-				*op++ = 0x80 | (inbuf[i] & 0x3f);
-			}
-		}
-		/* Frame trailer. */
-		*op++ = 0xff;
-		assert(op <= outbuf + sizeof outbuf);
-		len = write(out, outbuf, op - outbuf);
-		if (len == -1) {
-			perror("write");
-			die(1);
-		} else if (len != op - outbuf)
-			die(0);
-	}
-}
-
-#else /* base64 */
 
 static void
 putb64(FILE *out, char *inb, size_t *inblen)
@@ -197,11 +96,36 @@ putb64(FILE *out, char *inb, size_t *inblen)
 	*inblen = 0;
 }
 
+/*
+ * Support for Hyxie 76.
+ */
+
 static void
-decode(FILE *in, int outfd)
+hyxie76_calcresponse(uint32_t key1, uint32_t key2, const char *key3, char *out)
+{
+	MD5_CTX c;
+	char in[16];
+
+	in[0] = key1 >> 24;
+	in[1] = key1 >> 16;
+	in[2] = key1 >> 8;
+	in[3] = key1;
+	in[4] = key2 >> 24;
+	in[5] = key2 >> 16;
+	in[6] = key2 >> 8;
+	in[7] = key2;
+	memcpy(in + 8, key3, 8);
+
+	MD5_Init(&c);
+	MD5_Update(&c, (void *)in, sizeof in);
+	MD5_Final((void *)out, &c);
+}
+
+static void
+hyxie76_decode(FILE *in, int outfd)
 {
 	FILE *out;
-	int ch;
+	unsigned char ch;
 	char inb[4];
 	size_t inblen = 0;
 
@@ -215,7 +139,8 @@ decode(FILE *in, int outfd)
 		/* Frame header. */
 		ch = pgetc(in);
 		if (ch != 0x00) {
-			fprintf(stderr, "malformed frame header received\n");
+			fprintf(stderr,
+			    "unsupported packet received: %#hhx\n", ch);
 			die(1);
 		}
 
@@ -252,8 +177,8 @@ decode(FILE *in, int outfd)
 	}
 }
 
-static int
-encode(int in, int out)
+static void
+hyxie76_encode(int in, int out)
 {
 	unsigned char inbuf[512];
 	char outbuf[sizeof inbuf * 2 + 2];
@@ -284,7 +209,166 @@ encode(int in, int out)
 	}
 }
 
-#endif
+/*
+ * Support for HyBi10.
+ */
+
+static void
+hybi10_calcaccept(const char *key, char *out)
+{
+	SHA_CTX c;
+	unsigned char hash[SHA_DIGEST_LENGTH];
+	int r;
+
+	SHA1_Init(&c);
+	SHA1_Update(&c, key, strlen(key));
+	SHA1_Update(&c, "258EAFA5-E914-47DA-95CA-C5AB0DC85B11", 36);
+	SHA1_Final(hash, &c);
+
+	r = b64_ntop(hash, sizeof hash, out, HYBI10_ACCEPTLEN + 1);
+	assert(r == HYBI10_ACCEPTLEN);
+	out[HYBI10_ACCEPTLEN] = '\0';
+}
+
+static uint64_t
+hybi10_getlength(FILE *in)
+{
+	uint64_t len;
+	int lenlen;
+	unsigned char ch;
+
+	ch = pgetc(in);
+	if (!(ch & 0x80)) {
+		fprintf(stderr, "mask bit not set\n");
+		die(1);
+	}
+	ch &= ~0x80;
+
+	/* Two or eight bytes of input length? */
+	switch (ch) {
+	case 126:
+		lenlen = 2;
+		break;
+	case 127:
+		lenlen = 8;
+		break;
+	default:
+		/* Small packet, length encoded directly. */
+		return (ch);
+	}
+
+	while (lenlen-- > 0)
+		len = len << 8 | pgetc(in);
+	return (len);
+}
+
+static void
+hybi10_getmasks(FILE *in, unsigned char masks[4])
+{
+	int i;
+
+	for (i = 0; i < 4; i++)
+		masks[i] = pgetc(in);
+}
+
+static void
+hybi10_decode(FILE *in, int outfd)
+{
+	FILE *out;
+	unsigned char ch, masks[4];
+	char inb[4];
+	size_t inblen = 0;
+	uint64_t i, framelen;
+
+	out = fdopen(outfd, "w");
+	if (out == NULL) {
+		perror("fdopen");
+		die(1);
+	}
+
+	for (;;) {
+		/* Frame header. */
+		ch = pgetc(in);
+		if (ch == 0x88) {
+			fprintf(stderr, "bombs away!\n");
+			for (;;) {
+				ch = pgetc(in);
+				fprintf(stderr, "Got %hhx\n", ch);
+			}
+		}
+		if (ch != 0x81) {
+			fprintf(stderr,
+			    "unsupported packet received: %#hhx\n", ch);
+			die(1);
+		}
+
+		/* Payload length. */
+		framelen = hybi10_getlength(in);
+		hybi10_getmasks(in, masks);
+		for (i = 0; i <framelen; i++) {
+			ch = pgetc(in);
+			if (ch == EOF) {
+				putb64(out, inb, &inblen);
+				die(0);
+			}
+
+			ch ^= masks[i % 4];
+			if (!((ch >= 'A' && ch <= 'Z') ||
+			    (ch >= 'a' && ch <= 'z') ||
+			    (ch >= '0' && ch <= '9') ||
+			    ch == '+' || ch == '/' || ch == '=')) {
+				fprintf(stderr,
+				    "non-Base64 character received\n");
+				die(1);
+			}
+
+			/* Base64 character. */
+			inb[inblen++] = ch;
+			if (inblen == sizeof inb)
+				putb64(out, inb, &inblen);
+		}
+
+		/* Frame trailer. */
+		putb64(out, inb, &inblen);
+		if (fflush(out) == -1) {
+			perror("fflush");
+			die(1);
+		}
+	}
+}
+
+static void
+hybi10_encode(int in, int out)
+{
+	unsigned char inbuf[125];
+	char outbuf[sizeof inbuf * 2 + 2];
+	ssize_t len, wlen;
+
+	/* Restrict size to 125 bytes, to prevent extended headers. */
+	for (;;) {
+		len = read(in, inbuf, sizeof inbuf);
+		fprintf(stderr, "Got %zd\n", len);
+		if (len == -1) {
+			perror("read");
+			die(1);
+		} else if (len == 0)
+			die(0);
+
+		/* Frame header. */
+		outbuf[0] = 0x81;
+		outbuf[1] = len;
+		/* Encode data as Base64. */
+		len = b64_ntop(inbuf, len, outbuf + 2, sizeof outbuf - 2) + 2;
+		assert(len >= 2);
+
+		wlen = write(out, outbuf, len);
+		if (wlen == -1) {
+			perror("write");
+			die(1);
+		} else if (wlen != len)
+			die(0);
+	}
+}
 
 static char *
 do_strndup(const char *str, size_t n)
@@ -332,27 +416,6 @@ parsehdrkey(const char *key)
 }
 
 static void
-calcresponse(uint32_t key1, uint32_t key2, const char *key3, char *out)
-{
-	MD5_CTX c;
-	char in[16];
-
-	in[0] = key1 >> 24;
-	in[1] = key1 >> 16;
-	in[2] = key1 >> 8;
-	in[3] = key1;
-	in[4] = key2 >> 24;
-	in[5] = key2 >> 16;
-	in[6] = key2 >> 8;
-	in[7] = key2;
-	memcpy(in + 8, key3, 8);
-
-	MD5_Init(&c);
-	MD5_Update(&c, (void *)in, sizeof in);
-	MD5_Final((void *)out, &c);
-}
-
-static void
 eat_flash_magic(void)
 {
 	static const char flash_magic[] = "<policy-file-request/>";
@@ -388,7 +451,8 @@ main(int argc, char *argv[])
 		struct sockaddr_in sa_in;
 		struct sockaddr_in6 sa_in6;
 	} sa;
-	char line[512], key3[8], response[16], *host = NULL, *origin = NULL;
+	char line[512], key3[8], *host = NULL,
+	    *origin = NULL, *key = NULL, *protocol;
 	unsigned long minport, maxport, port;
 	uint32_t key1 = 0, key2 = 0;
 	socklen_t salen;
@@ -444,10 +508,21 @@ main(int argc, char *argv[])
 			host = parsestring(line + 6);
 		} else if (strncasecmp(line, "Origin: ", 8) == 0) {
 			origin = parsestring(line + 8);
+		} else if (strncasecmp(line, "Sec-WebSocket-Key: ", 19) == 0) {
+			hybi10 = 1;
+			key = parsestring(line + 19);
 		} else if (strncasecmp(line, "Sec-WebSocket-Key1: ", 20) == 0) {
 			key1 = parsehdrkey(line + 20);
 		} else if (strncasecmp(line, "Sec-WebSocket-Key2: ", 20) == 0) {
 			key2 = parsehdrkey(line + 20);
+		} else if (strncasecmp(line, "Sec-WebSocket-Protocol: ",
+		    24) == 0) {
+			protocol = parsestring(line + 24);
+			if (strcmp(protocol, "base64") != 0) {
+				fprintf(stderr, "Unsupported protocol: %s\n",
+				    protocol);
+				return (1);
+			}
 		}
 	} while (strcmp(line, "\n") != 0 && strcmp(line, "\r\n") != 0);
 
@@ -461,10 +536,11 @@ main(int argc, char *argv[])
 	}
 
 	/* Eight byte payload. */
-	if (fread(key3, sizeof key3, 1, stdin) != 1) {
-		fprintf(stderr, "key data missing\n");
-		return (1);
-	}
+	if (!hybi10)
+		if (fread(key3, sizeof key3, 1, stdin) != 1) {
+			fprintf(stderr, "key data missing\n");
+			return (1);
+		}
 
 	/* Use our own address. Fall back to 127.0.0.1 on failure. */
 	salen = sizeof sa;
@@ -496,15 +572,29 @@ main(int argc, char *argv[])
 		return (1);
 	}
 
-	/* Send HTTP response. */
-	calcresponse(key1, key2, key3, response);
-	printf("HTTP/1.1 101 WebSocket Protocol Handshake\r\n"
-	    "Upgrade: WebSocket\r\n"
-	    "Connection: Upgrade\r\n"
-	    "Sec-WebSocket-Origin: %s\r\n"
-	    "Sec-WebSocket-Location: ws://%s/%lu\r\n"
-	    "Sec-WebSocket-Protocol: base64\r\n\r\n", origin, host, port);
-	fwrite(response, sizeof response, 1, stdout);
+	/* Send HTTP response, based on protocol version. */
+	if (key != NULL) {
+		char accept[HYBI10_ACCEPTLEN + 1];
+
+		hybi10_calcaccept(key, accept);
+		printf("HTTP/1.1 101 Switching Protocols\r\n"
+		    "Upgrade: websocket\r\n"
+		    "Connection: Upgrade\r\n"
+		    "Sec-WebSocket-Accept: %s\r\n"
+		    "Sec-WebSocket-Protocol: base64\r\n\r\n", accept);
+	} else {
+		char response[MD5_DIGEST_LENGTH];
+
+		hyxie76_calcresponse(key1, key2, key3, response);
+		printf("HTTP/1.1 101 WebSocket Protocol Handshake\r\n"
+		    "Upgrade: WebSocket\r\n"
+		    "Connection: Upgrade\r\n"
+		    "Sec-WebSocket-Origin: %s\r\n"
+		    "Sec-WebSocket-Location: ws://%s/%lu\r\n"
+		    "Sec-WebSocket-Protocol: base64\r\n\r\n",
+		    origin, host, port);
+		fwrite(response, sizeof response, 1, stdout);
+	}
 	fflush(stdout);
 
 	/* Spawn child process for bi-directional pipe. */
@@ -514,10 +604,16 @@ main(int argc, char *argv[])
 		return (1);
 	} else if (pid == 0) {
 		other = getppid();
-		decode(stdin, s);
+		if (hybi10)
+			hybi10_decode(stdin, s);
+		else
+			hyxie76_decode(stdin, s);
 	} else {
 		other = pid;
-		encode(s, STDOUT_FILENO);
+		if (hybi10)
+			hybi10_encode(s, STDOUT_FILENO);
+		else
+			hyxie76_encode(s, STDOUT_FILENO);
 	}
 	assert(0);
 }
