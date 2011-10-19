@@ -257,6 +257,7 @@ hybi10_getlength(FILE *in)
 		return (ch);
 	}
 
+	len = 0;
 	while (lenlen-- > 0)
 		len = len << 8 | pgetc(in);
 	return (len);
@@ -289,13 +290,6 @@ hybi10_decode(FILE *in, int outfd)
 	for (;;) {
 		/* Frame header. */
 		ch = pgetc(in);
-		if (ch == 0x88) {
-			fprintf(stderr, "bombs away!\n");
-			for (;;) {
-				ch = pgetc(in);
-				fprintf(stderr, "Got %hhx\n", ch);
-			}
-		}
 		if (ch != 0x81) {
 			fprintf(stderr,
 			    "unsupported packet received: %#hhx\n", ch);
@@ -305,7 +299,7 @@ hybi10_decode(FILE *in, int outfd)
 		/* Payload length. */
 		framelen = hybi10_getlength(in);
 		hybi10_getmasks(in, masks);
-		for (i = 0; i <framelen; i++) {
+		for (i = 0; i < framelen; i++) {
 			ch = pgetc(in);
 			if (ch == EOF) {
 				putb64(out, inb, &inblen);
@@ -347,7 +341,6 @@ hybi10_encode(int in, int out)
 	/* Restrict size to 125 bytes, to prevent extended headers. */
 	for (;;) {
 		len = read(in, inbuf, sizeof inbuf);
-		fprintf(stderr, "Got %zd\n", len);
 		if (len == -1) {
 			perror("read");
 			die(1);
@@ -356,10 +349,12 @@ hybi10_encode(int in, int out)
 
 		/* Frame header. */
 		outbuf[0] = 0x81;
-		outbuf[1] = len;
 		/* Encode data as Base64. */
-		len = b64_ntop(inbuf, len, outbuf + 2, sizeof outbuf - 2) + 2;
-		assert(len >= 2);
+		len = b64_ntop(inbuf, len, outbuf + 2, sizeof outbuf - 2);
+		assert(len >= 0);
+		/* Store output length. */
+		outbuf[1] = len;
+		len += 2;
 
 		wlen = write(out, outbuf, len);
 		if (wlen == -1) {
