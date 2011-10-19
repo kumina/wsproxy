@@ -147,18 +147,7 @@ hyxie76_decode(FILE *in, int outfd)
 			die(1);
 		}
 
-		for (;;) {
-			ch = pgetc(in);
-			/* Frame trailer. */
-			if (ch == 0xff) {
-				putb64(out, inb, &inblen);
-				if (fflush(out) == -1) {
-					perror("fflush");
-					die(1);
-				}
-				break;
-			}
-
+		while ((ch = pgetc(in)) != 0xff) {
 			if (!((ch >= 'A' && ch <= 'Z') ||
 			    (ch >= 'a' && ch <= 'z') ||
 			    (ch >= '0' && ch <= '9') ||
@@ -172,6 +161,13 @@ hyxie76_decode(FILE *in, int outfd)
 			inb[inblen++] = ch;
 			if (inblen == sizeof inb)
 				putb64(out, inb, &inblen);
+		}
+
+		/* Frame trailer. */
+		putb64(out, inb, &inblen);
+		if (fflush(out) == -1) {
+			perror("fflush");
+			die(1);
 		}
 	}
 }
@@ -196,7 +192,7 @@ hyxie76_encode(int in, int out)
 		/* Encode data as Base64. */
 		len = b64_ntop(inbuf, len, outbuf + 1, sizeof outbuf - 1);
 		assert(len > 0);
-		/* Frame footer. */
+		/* Frame trailer. */
 		outbuf[len + 1] = 0xff;
 
 		wlen = write(out, outbuf, len + 2);
