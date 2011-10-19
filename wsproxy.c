@@ -217,7 +217,6 @@ hybi10_calcaccept(const char *key, char *out)
 
 	r = b64_ntop(hash, sizeof hash, out, HYBI10_ACCEPTHDRLEN);
 	assert(r == HYBI10_ACCEPTHDRLEN - 1);
-	out[HYBI10_ACCEPTHDRLEN - 1] = '\0';
 }
 
 static uint64_t
