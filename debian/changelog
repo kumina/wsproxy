@@ -1,3 +1,9 @@
+wsproxy (1.1-1KUMIRELEASE1) unstable; urgency=low
+
+  * Add support for HyBi-10.
+
+ -- Ed Schouten <ed@kumina.nl>  Wed, 19 Oct 2011 21:48:13 +0200
+
 wsproxy (1.0-1KUMIRELEASE4) unstable; urgency=low
 
   * Add /wsproxy-monitoring/ for monitoring purposes.

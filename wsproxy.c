@@ -40,7 +40,9 @@
 #include <openssl/md5.h>
 #include <openssl/sha.h>
 
-#define	HYBI10_ACCEPTLEN	28
+#define	HYXIE76_MAXOFRAME	2048
+
+#define	HYBI10_ACCEPTHDRLEN	29
 #define	HYBI10_MAXOFRAME	125
 
 static pid_t other;
@@ -147,10 +149,6 @@ hyxie76_decode(FILE *in, int outfd)
 
 		for (;;) {
 			ch = pgetc(in);
-			if (ch == EOF) {
-				putb64(out, inb, &inblen);
-				die(0);
-			}
 			/* Frame trailer. */
 			if (ch == 0xff) {
 				putb64(out, inb, &inblen);
@@ -181,8 +179,8 @@ hyxie76_decode(FILE *in, int outfd)
 static void
 hyxie76_encode(int in, int out)
 {
-	unsigned char inbuf[512];
-	char outbuf[sizeof inbuf * 2 + 2];
+	unsigned char inbuf[HYXIE76_MAXOFRAME / 4 * 3];
+	char outbuf[HYXIE76_MAXOFRAME + 2];
 	ssize_t len, wlen;
 
 	for (;;) {
@@ -196,12 +194,12 @@ hyxie76_encode(int in, int out)
 		/* Frame header. */
 		outbuf[0] = 0x00;
 		/* Encode data as Base64. */
-		len = b64_ntop(inbuf, len, outbuf + 1, sizeof outbuf - 1) + 1;
-		assert(len >= 1);
+		len = b64_ntop(inbuf, len, outbuf + 1, sizeof outbuf - 1);
+		assert(len > 0);
 		/* Frame footer. */
-		outbuf[len++] = 0xff;
+		outbuf[len + 1] = 0xff;
 
-		wlen = write(out, outbuf, len);
+		wlen = write(out, outbuf, len + 2);
 		if (wlen == -1) {
 			perror("write");
 			die(1);
@@ -226,9 +224,9 @@ hybi10_calcaccept(const char *key, char *out)
 	SHA1_Update(&c, "258EAFA5-E914-47DA-95CA-C5AB0DC85B11", 36);
 	SHA1_Final(hash, &c);
 
-	r = b64_ntop(hash, sizeof hash, out, HYBI10_ACCEPTLEN + 1);
-	assert(r == HYBI10_ACCEPTLEN);
-	out[HYBI10_ACCEPTLEN] = '\0';
+	r = b64_ntop(hash, sizeof hash, out, HYBI10_ACCEPTHDRLEN);
+	assert(r == HYBI10_ACCEPTHDRLEN - 1);
+	out[HYBI10_ACCEPTHDRLEN - 1] = '\0';
 }
 
 static uint64_t
@@ -301,13 +299,7 @@ hybi10_decode(FILE *in, int outfd)
 		framelen = hybi10_getlength(in);
 		hybi10_getmasks(in, masks);
 		for (i = 0; i < framelen; i++) {
-			ch = pgetc(in);
-			if (ch == EOF) {
-				putb64(out, inb, &inblen);
-				die(0);
-			}
-
-			ch ^= masks[i % 4];
+			ch = pgetc(in) ^ masks[i % 4];
 			if (!((ch >= 'A' && ch <= 'Z') ||
 			    (ch >= 'a' && ch <= 'z') ||
 			    (ch >= '0' && ch <= '9') ||
@@ -339,7 +331,6 @@ hybi10_encode(int in, int out)
 	char outbuf[HYBI10_MAXOFRAME + 3]; /* Two-byte header + nul. */
 	ssize_t len, wlen;
 
-	/* Restrict size to 125 bytes, to prevent extended headers. */
 	for (;;) {
 		len = read(in, inbuf, sizeof inbuf);
 		if (len == -1) {
@@ -352,7 +343,7 @@ hybi10_encode(int in, int out)
 		outbuf[0] = 0x81;
 		/* Encode data as Base64. */
 		len = b64_ntop(inbuf, len, outbuf + 2, sizeof outbuf - 2);
-		assert(len >= 0);
+		assert(len > 0);
 		/* Store output length. */
 		outbuf[1] = len;
 		len += 2;
@@ -415,7 +406,7 @@ static void
 eat_flash_magic(void)
 {
 	static const char flash_magic[] = "<policy-file-request/>";
-	ssize_t i;
+	size_t i;
 	int ch;
 
 	for (i = 0; i < sizeof flash_magic - 1; i++) {
@@ -427,7 +418,7 @@ eat_flash_magic(void)
 		/* Not a Flash applet.  Roll back. */
 		if (ch != flash_magic[i]) {
 			ungetc(ch, stdin);
-			while (--i >= 0)
+			while (i-- > 0)
 				ungetc(flash_magic[i], stdin);
 			return;
 		}
@@ -569,15 +560,15 @@ main(int argc, char *argv[])
 	}
 
 	/* Send HTTP response, based on protocol version. */
-	if (key != NULL) {
-		char accept[HYBI10_ACCEPTLEN + 1];
+	if (hybi10) {
+		char accepthdr[HYBI10_ACCEPTHDRLEN];
 
-		hybi10_calcaccept(key, accept);
+		hybi10_calcaccept(key, accepthdr);
 		printf("HTTP/1.1 101 Switching Protocols\r\n"
 		    "Upgrade: websocket\r\n"
 		    "Connection: Upgrade\r\n"
 		    "Sec-WebSocket-Accept: %s\r\n"
-		    "Sec-WebSocket-Protocol: base64\r\n\r\n", accept);
+		    "Sec-WebSocket-Protocol: base64\r\n\r\n", accepthdr);
 	} else {
 		char response[MD5_DIGEST_LENGTH];
 
