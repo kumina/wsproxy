@@ -466,12 +466,18 @@ main(int argc, char *argv[])
 		DPRINTF("malformed HTTP header received");
 		return (1);
 	}
-	if (strncmp(line, "GET /wsproxy-monitoring/ ", 25) == 0)
+	if (strncmp(line, "GET /wsproxy-monitoring/ ", 25) == 0) {
 		monitoring = 1;
-	port = strtoul(line + 5, NULL, 10);
-	if (!monitoring && (port < minport || port > maxport)) {
-		DPRINTF("port not allowed");
-		return (1);
+	} else if (minport == maxport) {
+		/* Simply ignore URL and connect to a single host. */
+		port = minport;
+	} else {
+		/* Multiplexing mode.  Use port number in URL. */
+		port = strtoul(line + 5, NULL, 10);
+		if (port < minport || port > maxport) {
+			DPRINTF("port not allowed");
+			return (1);
+		}
 	}
 	
 	/* Parse HTTP headers. */
