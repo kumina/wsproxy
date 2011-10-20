@@ -232,13 +232,12 @@ hybi10_encode(int in, int out)
 		} else if (len == 0)
 			die(0);
 
-		/* Frame header. */
-		outbuf[0] = 0x81;
-		outbuf[1] = 126;
 		/* Encode data as Base64. */
 		len = b64_ntop(inbuf, len, outbuf + 4, sizeof outbuf - 4);
 		assert(len > 0 && len <= MAXOFRAME);
-		/* Store output length. */
+		/* Frame header. */
+		outbuf[0] = 0x81;
+		outbuf[1] = 126;
 		outbuf[2] = len >> 8;
 		outbuf[3] = len;
 		len += 4;
