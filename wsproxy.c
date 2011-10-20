@@ -40,7 +40,7 @@
 #include <openssl/md5.h>
 #include <openssl/sha.h>
 
-#define	HYXIE76_MAXOFRAME	2048
+#define	HYXIE76_MAXOFRAME	1250
 
 #define	HYBI10_ACCEPTHDRLEN	29
 #define	HYBI10_MAXOFRAME	125
