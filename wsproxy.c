@@ -40,7 +40,7 @@
 #include <openssl/md5.h>
 #include <openssl/sha.h>
 
-#define	HYXIE76_MAXOFRAME	1250
+#define	HIXIE76_MAXOFRAME	1250
 
 #define	HYBI10_ACCEPTHDRLEN	29
 #define	HYBI10_MAXOFRAME	125
@@ -107,109 +107,11 @@ putb64(FILE *out, char *inb, size_t *inblen)
 }
 
 /*
- * Support for Hyxie 76.
- */
-
-static void
-hyxie76_calcresponse(uint32_t key1, uint32_t key2, const char *key3, char *out)
-{
-	MD5_CTX c;
-	char in[16] = {
-	    key1 >> 24, key1 >> 16, key1 >> 8, key1,
-	    key2 >> 24, key2 >> 16, key2 >> 8, key2,
-	    key3[0], key3[1], key3[2], key3[3],
-	    key3[4], key3[5], key3[6], key3[7]
-	};
-
-	MD5_Init(&c);
-	MD5_Update(&c, (void *)in, sizeof in);
-	MD5_Final((void *)out, &c);
-}
-
-static void
-hyxie76_decode(FILE *in, int outfd)
-{
-	FILE *out;
-	unsigned char ch;
-	char inb[4];
-	size_t inblen = 0;
-
-	out = fdopen(outfd, "w");
-	if (out == NULL) {
-		perror("fdopen");
-		die(1);
-	}
-
-	for (;;) {
-		/* Frame header. */
-		ch = pgetc(in);
-		if (ch != 0x00) {
-			DPRINTF("unsupported packet received: %#hhx", ch);
-			die(1);
-		}
-
-		while ((ch = pgetc(in)) != 0xff) {
-			if (!((ch >= 'A' && ch <= 'Z') ||
-			    (ch >= 'a' && ch <= 'z') ||
-			    (ch >= '0' && ch <= '9') ||
-			    ch == '+' || ch == '/' || ch == '=')) {
-				DPRINTF("non-Base64 character received");
-				die(1);
-			}
-
-			/* Base64 character. */
-			inb[inblen++] = ch;
-			if (inblen == sizeof inb)
-				putb64(out, inb, &inblen);
-		}
-
-		/* Frame trailer. */
-		putb64(out, inb, &inblen);
-		if (fflush(out) == -1) {
-			perror("fflush");
-			die(1);
-		}
-	}
-}
-
-static void
-hyxie76_encode(int in, int out)
-{
-	unsigned char inbuf[HYXIE76_MAXOFRAME / 4 * 3];
-	char outbuf[HYXIE76_MAXOFRAME + 2];
-	ssize_t len, wlen;
-
-	for (;;) {
-		len = read(in, inbuf, sizeof inbuf);
-		if (len == -1) {
-			perror("read");
-			die(1);
-		} else if (len == 0)
-			die(0);
-
-		/* Frame header. */
-		outbuf[0] = 0x00;
-		/* Encode data as Base64. */
-		len = b64_ntop(inbuf, len, outbuf + 1, sizeof outbuf - 1);
-		assert(len > 0);
-		/* Frame trailer. */
-		outbuf[len + 1] = 0xff;
-
-		wlen = write(out, outbuf, len + 2);
-		if (wlen == -1) {
-			perror("write");
-			die(1);
-		} else if (wlen != len + 2)
-			die(0);
-	}
-}
-
-/*
  * Support for HyBi10.
  */
 
 static void
-hybi10_calcaccept(const char *key, char *out)
+hybi10_calcaccepthdr(const char *key, char *out)
 {
 	SHA_CTX c;
 	unsigned char hash[SHA_DIGEST_LENGTH];
@@ -346,6 +248,104 @@ hybi10_encode(int in, int out)
 			perror("write");
 			die(1);
 		} else if (wlen != len)
+			die(0);
+	}
+}
+
+/*
+ * Support for Hixie 76.
+ */
+
+static void
+hixie76_calcresponse(uint32_t key1, uint32_t key2, const char *key3, char *out)
+{
+	MD5_CTX c;
+	char in[16] = {
+	    key1 >> 24, key1 >> 16, key1 >> 8, key1,
+	    key2 >> 24, key2 >> 16, key2 >> 8, key2,
+	    key3[0], key3[1], key3[2], key3[3],
+	    key3[4], key3[5], key3[6], key3[7]
+	};
+
+	MD5_Init(&c);
+	MD5_Update(&c, (void *)in, sizeof in);
+	MD5_Final((void *)out, &c);
+}
+
+static void
+hixie76_decode(FILE *in, int outfd)
+{
+	FILE *out;
+	unsigned char ch;
+	char inb[4];
+	size_t inblen = 0;
+
+	out = fdopen(outfd, "w");
+	if (out == NULL) {
+		perror("fdopen");
+		die(1);
+	}
+
+	for (;;) {
+		/* Frame header. */
+		ch = pgetc(in);
+		if (ch != 0x00) {
+			DPRINTF("unsupported packet received: %#hhx", ch);
+			die(1);
+		}
+
+		while ((ch = pgetc(in)) != 0xff) {
+			if (!((ch >= 'A' && ch <= 'Z') ||
+			    (ch >= 'a' && ch <= 'z') ||
+			    (ch >= '0' && ch <= '9') ||
+			    ch == '+' || ch == '/' || ch == '=')) {
+				DPRINTF("non-Base64 character received");
+				die(1);
+			}
+
+			/* Base64 character. */
+			inb[inblen++] = ch;
+			if (inblen == sizeof inb)
+				putb64(out, inb, &inblen);
+		}
+
+		/* Frame trailer. */
+		putb64(out, inb, &inblen);
+		if (fflush(out) == -1) {
+			perror("fflush");
+			die(1);
+		}
+	}
+}
+
+static void
+hixie76_encode(int in, int out)
+{
+	unsigned char inbuf[HIXIE76_MAXOFRAME / 4 * 3];
+	char outbuf[HIXIE76_MAXOFRAME + 2];
+	ssize_t len, wlen;
+
+	for (;;) {
+		len = read(in, inbuf, sizeof inbuf);
+		if (len == -1) {
+			perror("read");
+			die(1);
+		} else if (len == 0)
+			die(0);
+
+		/* Frame header. */
+		outbuf[0] = 0x00;
+		/* Encode data as Base64. */
+		len = b64_ntop(inbuf, len, outbuf + 1, sizeof outbuf - 1);
+		assert(len > 0);
+		/* Frame trailer. */
+		outbuf[len + 1] = 0xff;
+
+		wlen = write(out, outbuf, len + 2);
+		if (wlen == -1) {
+			perror("write");
+			die(1);
+		} else if (wlen != len + 2)
 			die(0);
 	}
 }
@@ -551,7 +551,7 @@ main(int argc, char *argv[])
 	if (hybi10) {
 		char accepthdr[HYBI10_ACCEPTHDRLEN];
 
-		hybi10_calcaccept(key, accepthdr);
+		hybi10_calcaccepthdr(key, accepthdr);
 		printf("HTTP/1.1 101 Switching Protocols\r\n"
 		    "Upgrade: websocket\r\n"
 		    "Connection: Upgrade\r\n"
@@ -560,7 +560,7 @@ main(int argc, char *argv[])
 	} else {
 		char response[MD5_DIGEST_LENGTH];
 
-		hyxie76_calcresponse(key1, key2, key3, response);
+		hixie76_calcresponse(key1, key2, key3, response);
 		printf("HTTP/1.1 101 WebSocket Protocol Handshake\r\n"
 		    "Upgrade: WebSocket\r\n"
 		    "Connection: Upgrade\r\n"
@@ -582,13 +582,13 @@ main(int argc, char *argv[])
 		if (hybi10)
 			hybi10_decode(stdin, s);
 		else
-			hyxie76_decode(stdin, s);
+			hixie76_decode(stdin, s);
 	} else {
 		other = pid;
 		if (hybi10)
 			hybi10_encode(s, STDOUT_FILENO);
 		else
-			hyxie76_encode(s, STDOUT_FILENO);
+			hixie76_encode(s, STDOUT_FILENO);
 	}
 	assert(0);
 }
