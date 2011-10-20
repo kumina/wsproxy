@@ -40,10 +40,8 @@
 #include <openssl/md5.h>
 #include <openssl/sha.h>
 
-#define	HIXIE76_MAXOFRAME	1250
-
+#define	MAXOFRAME		UINT16_MAX
 #define	HYBI10_ACCEPTHDRLEN	29
-#define	HYBI10_MAXOFRAME	125
 
 #ifdef DEBUG
 #define	DPRINTF(fmt, ...)	fprintf(stderr, fmt "\n", ## __VA_ARGS__)
@@ -222,8 +220,8 @@ hybi10_decode(FILE *in, int outfd)
 static void
 hybi10_encode(int in, int out)
 {
-	unsigned char inbuf[HYBI10_MAXOFRAME / 4 * 3];
-	char outbuf[HYBI10_MAXOFRAME + 3]; /* Two-byte header + nul. */
+	unsigned char inbuf[MAXOFRAME / 4 * 3];
+	char outbuf[MAXOFRAME + 5]; /* Four-byte header + nul. */
 	ssize_t len, wlen;
 
 	for (;;) {
@@ -236,12 +234,14 @@ hybi10_encode(int in, int out)
 
 		/* Frame header. */
 		outbuf[0] = 0x81;
+		outbuf[1] = 126;
 		/* Encode data as Base64. */
-		len = b64_ntop(inbuf, len, outbuf + 2, sizeof outbuf - 2);
-		assert(len > 0);
+		len = b64_ntop(inbuf, len, outbuf + 4, sizeof outbuf - 4);
+		assert(len > 0 && len <= MAXOFRAME);
 		/* Store output length. */
-		outbuf[1] = len;
-		len += 2;
+		outbuf[2] = len >> 8;
+		outbuf[3] = len;
+		len += 4;
 
 		wlen = write(out, outbuf, len);
 		if (wlen == -1) {
@@ -321,8 +321,8 @@ hixie76_decode(FILE *in, int outfd)
 static void
 hixie76_encode(int in, int out)
 {
-	unsigned char inbuf[HIXIE76_MAXOFRAME / 4 * 3];
-	char outbuf[HIXIE76_MAXOFRAME + 2];
+	unsigned char inbuf[MAXOFRAME / 4 * 3];
+	char outbuf[MAXOFRAME + 2];
 	ssize_t len, wlen;
 
 	for (;;) {
@@ -337,7 +337,7 @@ hixie76_encode(int in, int out)
 		outbuf[0] = 0x00;
 		/* Encode data as Base64. */
 		len = b64_ntop(inbuf, len, outbuf + 1, sizeof outbuf - 1);
-		assert(len > 0);
+		assert(len > 0 && len <= MAXOFRAME);
 		/* Frame trailer. */
 		outbuf[len + 1] = 0xff;
 
