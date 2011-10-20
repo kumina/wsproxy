@@ -24,4 +24,6 @@ wsproxy can be enabled by adding the following line to inetd.conf:
 
 The two parameters of wsproxy denote the minimum and the maximum allowed
 port numbers. This allows a single wsproxy instance to multiplex
-connections to multiple VNC servers.
+connections to multiple VNC servers. When the minimum and the maximum
+allowed port numbers are identical, wsproxy will connect to that port,
+regardless of the file name provided.
