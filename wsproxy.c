@@ -468,6 +468,7 @@ main(int argc, char *argv[])
 	}
 	if (strncmp(line, "GET /wsproxy-monitoring/ ", 25) == 0) {
 		monitoring = 1;
+		port = 0; /* Keep compiler happy. */
 	} else if (minport == maxport) {
 		/* Simply ignore URL and connect to a single host. */
 		port = minport;
