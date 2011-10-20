@@ -45,14 +45,15 @@
 #define	HYBI10_ACCEPTHDRLEN	29
 #define	HYBI10_MAXOFRAME	125
 
-static pid_t other;
+static pid_t other = -1;
 static int hybi10 = 0;
 
 static void
 die(int exitcode)
 {
 
-	kill(other, SIGTERM);
+	if (other != -1)
+		kill(other, SIGTERM);
 	exit(exitcode);
 }
 
@@ -397,14 +398,10 @@ eat_flash_magic(void)
 {
 	static const char flash_magic[] = "<policy-file-request/>";
 	size_t i;
-	int ch;
+	char ch;
 
 	for (i = 0; i < sizeof flash_magic - 1; i++) {
-		ch = getchar();
-		if (ch == EOF) {
-			perror("getc");
-			exit(1);
-		}
+		ch = pgetc(stdin);
 		/* Not a Flash applet.  Roll back. */
 		if (ch != flash_magic[i]) {
 			ungetc(ch, stdin);
