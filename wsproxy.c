@@ -199,7 +199,7 @@ hyxie76_encode(int in, int out)
 		if (wlen == -1) {
 			perror("write");
 			die(1);
-		} else if (wlen != len)
+		} else if (wlen != len + 2)
 			die(0);
 	}
 }
