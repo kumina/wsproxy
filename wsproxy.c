@@ -45,6 +45,12 @@
 #define	HYBI10_ACCEPTHDRLEN	29
 #define	HYBI10_MAXOFRAME	125
 
+#ifdef DEBUG
+#define	DPRINTF(fmt, ...)	fprintf(stderr, fmt "\n", ## __VA_ARGS__)
+#else
+#define	DPRINTF(fmt, ...)
+#endif
+
 static pid_t other = -1;
 static int hybi10 = 0;
 
@@ -90,7 +96,7 @@ putb64(FILE *out, char *inb, size_t *inblen)
 	memcpy(inbuf, inb, *inblen);
 	outbuflen = b64_pton(inbuf, outbuf, sizeof outbuf);
 	if (outbuflen <= 0) {
-		fprintf(stderr, "invalid Base64 data\n");
+		DPRINTF("invalid Base64 data");
 		die(1);
 	}
 	if (fwrite(outbuf, outbuflen, 1, out) != 1) {
@@ -138,8 +144,7 @@ hyxie76_decode(FILE *in, int outfd)
 		/* Frame header. */
 		ch = pgetc(in);
 		if (ch != 0x00) {
-			fprintf(stderr,
-			    "unsupported packet received: %#hhx\n", ch);
+			DPRINTF("unsupported packet received: %#hhx", ch);
 			die(1);
 		}
 
@@ -148,8 +153,7 @@ hyxie76_decode(FILE *in, int outfd)
 			    (ch >= 'a' && ch <= 'z') ||
 			    (ch >= '0' && ch <= '9') ||
 			    ch == '+' || ch == '/' || ch == '=')) {
-				fprintf(stderr,
-				    "non-Base64 character received\n");
+				DPRINTF("non-Base64 character received");
 				die(1);
 			}
 
@@ -229,7 +233,7 @@ hybi10_getlength(FILE *in)
 
 	ch = pgetc(in);
 	if (!(ch & 0x80)) {
-		fprintf(stderr, "mask bit not set\n");
+		DPRINTF("mask bit not set");
 		die(1);
 	}
 	ch &= ~0x80;
@@ -281,8 +285,7 @@ hybi10_decode(FILE *in, int outfd)
 		/* Frame header. */
 		ch = pgetc(in);
 		if (ch != 0x81) {
-			fprintf(stderr,
-			    "unsupported packet received: %#hhx\n", ch);
+			DPRINTF("unsupported packet received: %#hhx", ch);
 			die(1);
 		}
 
@@ -295,8 +298,7 @@ hybi10_decode(FILE *in, int outfd)
 			    (ch >= 'a' && ch <= 'z') ||
 			    (ch >= '0' && ch <= '9') ||
 			    ch == '+' || ch == '/' || ch == '=')) {
-				fprintf(stderr,
-				    "non-Base64 character received\n");
+				DPRINTF("non-Base64 character received");
 				die(1);
 			}
 
@@ -461,21 +463,21 @@ main(int argc, char *argv[])
 		return (1);
 	}
 	if (strncmp(line, "GET /", 5) != 0) {
-		fprintf(stderr, "malformed HTTP header received\n");
+		DPRINTF("malformed HTTP header received");
 		return (1);
 	}
 	if (strncmp(line, "GET /wsproxy-monitoring/ ", 25) == 0)
 		monitoring = 1;
 	port = strtoul(line + 5, NULL, 10);
 	if (!monitoring && (port < minport || port > maxport)) {
-		fprintf(stderr, "port not allowed\n");
+		DPRINTF("port not allowed");
 		return (1);
 	}
 	
 	/* Parse HTTP headers. */
 	do {
 		if (fgets(line, sizeof line, stdin) == NULL) {
-			fprintf(stderr, "partial HTTP header received\n");
+			DPRINTF("partial HTTP header received");
 			return (1);
 		}
 		if (strncasecmp(line, "Host: ", 6) == 0) {
@@ -493,8 +495,7 @@ main(int argc, char *argv[])
 		    24) == 0) {
 			protocol = parsestring(line + 24);
 			if (strcmp(protocol, "base64") != 0) {
-				fprintf(stderr, "Unsupported protocol: %s\n",
-				    protocol);
+				DPRINTF("Unsupported protocol: %s", protocol);
 				return (1);
 			}
 		}
@@ -512,7 +513,7 @@ main(int argc, char *argv[])
 	/* Eight byte payload. */
 	if (!hybi10)
 		if (fread(key3, sizeof key3, 1, stdin) != 1) {
-			fprintf(stderr, "key data missing\n");
+			DPRINTF("key data missing");
 			return (1);
 		}
 
@@ -533,7 +534,7 @@ main(int argc, char *argv[])
 		break;
 	default:
 		/* Unknown protocol. */
-		fprintf(stderr, "unsupported network protocol\n");
+		DPRINTF("unsupported network protocol");
 		return (1);
 	}
 	s = socket(sa.sa.sa_family, SOCK_STREAM, 0);
