@@ -82,7 +82,7 @@ pgetc(FILE *fp)
 }
 
 static void
-putb64(FILE *out, char *inb, size_t *inblen)
+putb64(FILE *out, const char *inb, size_t *inblen)
 {
 	char inbuf[5] = { 0 };
 	unsigned char outbuf[3];
