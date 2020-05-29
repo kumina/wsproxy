@@ -1,3 +1,5 @@
+**Important** Kumina is no longer actively maintaining this code, feel free to fork and publish yourself!
+
 ## wsproxy: WebSockets-to-TCP proxy (for noVNC)
 
 ### Description
